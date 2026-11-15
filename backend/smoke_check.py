@@ -86,14 +86,24 @@ def settings_and_alerts():
         requests.put(BASE + "/api/v1/settings", json=orig, timeout=60)
 
 
-def research(sym: str, expect_scorecard: bool):
+def research(sym: str, expect_scorecard: bool, timeout: float = 60):
+    """Start a research job and poll it. If it runs long, print live progress so a slow free-tier box is
+    distinguishable from a stuck job."""
     jid = requests.post(f"{BASE}/api/v1/research/{sym}/analyze", json={"modules": None}, timeout=60).json()["job_id"]
     t = time.time()
-    while time.time() - t < 420:
+    last_print, last_stage = 0.0, None
+    j = {"status": "queued", "stage": "?", "progress": 0}
+    while time.time() - t < timeout:
         j = get(f"/api/v1/research/jobs/{jid}")
         if j["status"] in ("complete", "failed"):
             break
+        el = time.time() - t
+        if el > 20 and (j["stage"] != last_stage or el - last_print > 20):   # taking longer than expected
+            print(f"      ... {sym} still {j['status']} after {el:.0f}s: {j['progress']:.0%} - {j['stage']}")
+            last_print, last_stage = el, j["stage"]
         time.sleep(2)
+    if j["status"] not in ("complete", "failed"):
+        raise AssertionError(f"{sym} job still {j['status']} after {timeout:.0f}s at {j['progress']:.0%} ({j['stage']})")
     assert j["status"] == "complete", j.get("error") or j["status"]
     r = j["result"]
     cites = [c for s in r["sections"] for cl in s["claims"] for c in cl["cites"]]
@@ -116,7 +126,7 @@ if __name__ == "__main__":
     step("results card (Revenue/EBITDA/PBT/PAT with QoQ/YoY)", results_card)
     step("management-change items and bio cards", mgmt)
     step("settings change moves alerts", settings_and_alerts)
-    step("research KPITTECH (seeded) + four-quarter scorecard", lambda: research("KPITTECH", True))
-    step("research ASIANPAINT (unseeded ticker, live ingest)", lambda: research("ASIANPAINT", True))
+    step("research KPITTECH (seeded) + four-quarter scorecard", lambda: research("KPITTECH", True, timeout=60))
+    step("research ASIANPAINT (unseeded ticker, live ingest)", lambda: research("ASIANPAINT", True, timeout=150))
     print("\nALL PASSED" if not failures else f"\n{failures} step(s) FAILED")
     sys.exit(1 if failures else 0)

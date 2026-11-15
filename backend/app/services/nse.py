@@ -116,8 +116,8 @@ def _live_fetch(symbol: str, days: int) -> list[dict]:
     start = end - timedelta(days=days)
     out: list[dict] = []
     cur = start
-    while cur < end:  # bounded chunks of at most 30 days
-        nxt = min(cur + timedelta(days=30), end)
+    while cur < end:  # bounded chunks (180d: NSE returns identical records, in 6x fewer throttled requests)
+        nxt = min(cur + timedelta(days=180), end)
         out.extend(_fetch_range(symbol, cur, nxt))
         cur = nxt + timedelta(days=1)
     return out

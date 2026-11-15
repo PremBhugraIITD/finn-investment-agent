@@ -31,6 +31,13 @@ MARKET_LIVE_BUDGET_S = float(os.getenv("MARKET_LIVE_BUDGET_S", "6"))
 INFO_TTL = 24 * 3600
 SCREENER_TTL = 24 * 3600
 
+# Live document ingestion limits (keep a cold, unseeded ticker inside ~20s and a 512 MB instance).
+MAX_PDF_PAGES = int(os.getenv("MAX_PDF_PAGES", "40"))        # pypdf extracts at most the first N pages of any PDF
+MAX_PDF_BYTES = int(os.getenv("MAX_PDF_BYTES", str(50_000_000)))
+INGEST_TRANSCRIPTS = 4                                        # most recent concall transcripts
+INGEST_ANNUAL_REPORTS = 1                                     # latest annual report only
+NSE_HISTORY_BUDGET_S = float(os.getenv("NSE_HISTORY_BUDGET_S", "8"))
+
 PROMPT_VERSION = "v2"
 
 USER_AGENT = (

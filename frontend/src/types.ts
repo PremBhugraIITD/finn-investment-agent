@@ -57,7 +57,7 @@ export interface ScoreRow {
   quarter: string; metric: string; promised: string; target?: string; note?: string; delivered: string; delta: string;
   status: "met" | "missed" | "partially met" | "not yet measurable"; guidance_cite: Cite | null; actual_cite: Cite | null;
 }
-export interface ResearchDoc { doc_id: string; kind: string; title: string; period: string; url: string; n_pages: number; status: string }
+export interface ResearchDoc { doc_id: string; kind: string; title: string; period: string; url: string; n_pages: number; total_pages?: number; status: string }
 export interface ResearchResult {
   symbol: string; name: string; as_of: string; source: string; models: { tier1: string; tier2: string };
   documents: ResearchDoc[]; sections: Section[]; modules: string[];

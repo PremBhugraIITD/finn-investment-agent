@@ -14,6 +14,7 @@ from bs4 import BeautifulSoup
 
 from .. import cache, config
 from ..models.schemas import FinnError
+from . import guidance as _g
 from .market_data import normalize_symbol
 
 _MONTHS = {m: i for i, m in enumerate(
@@ -104,3 +105,20 @@ def get_documents(symbol: str, force: bool = False) -> dict[str, Any]:
         if rec:
             return rec | {"source": origin or "cache", "is_stale": True}
         raise FinnError("SCREENER_UNAVAILABLE", f"Screener is unavailable for {symbol}.", 503)
+
+
+def select_for_ingest(docs: dict[str, Any]) -> dict[str, list[dict]]:
+    """Cap what a live ingest will download: the config.INGEST_TRANSCRIPTS most recent concall
+    transcripts (one per fiscal quarter, raw transcripts only) and the latest annual report."""
+    transcripts: list[dict] = []
+    seen: set[int] = set()
+    for c in docs.get("concalls", []):                      # already sorted newest first
+        qi = _g.qidx_from_period(c.get("period", ""))
+        if c.get("transcript") and qi is not None and qi not in seen:
+            seen.add(qi)
+            transcripts.append({"period": c["period"], "url": c["transcript"], "q": qi})
+            if len(transcripts) >= config.INGEST_TRANSCRIPTS:
+                break
+    annual = [{"title": a["title"], "year": a["year"], "url": a["url"]}
+              for a in docs.get("annual_reports", [])[: config.INGEST_ANNUAL_REPORTS]]
+    return {"transcripts": transcripts, "annual_reports": annual}

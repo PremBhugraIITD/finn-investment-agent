@@ -313,7 +313,7 @@ function CompanyView({ symbol }: { symbol: string }) {
                 {result.documents.map((d) => (
                   <li key={d.doc_id} className="flex items-baseline justify-between gap-2">
                     <span className="min-w-0 truncate text-ink-2">{d.kind.replace("_", " ")} · {d.period}</span>
-                    <span className="num shrink-0 text-faint">{d.n_pages} pp</span><Ext href={d.url}>Open</Ext>
+                    <span className="num shrink-0 text-faint">{d.total_pages && d.total_pages > d.n_pages ? `first ${d.n_pages} of ${d.total_pages}` : d.n_pages} pp</span><Ext href={d.url}>Open</Ext>
                   </li>
                 ))}
               </ul>

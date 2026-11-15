@@ -138,11 +138,17 @@ def _results_candidates(recs: list[dict], n_quarters: int = 5) -> list[dict]:
     return picked
 
 
-def _history(symbol: str, days: int = 500) -> list[dict]:
+def _history(symbol: str, days: int = 500, budget: float | None = None) -> list[dict]:
+    """NSE filing history, bounded in time. If NSE is slow or blocking us, use whatever the runtime cache and
+    the committed seed already hold; the refresh keeps running in the background and updates the cache."""
+    budget = config.NSE_HISTORY_BUDGET_S if budget is None else budget
     cached, seeded = nse._load(symbol)
     if cached.get("covered_days", 0) < days:
+        ex = ThreadPoolExecutor(max_workers=1)
+        fut = ex.submit(nse.refresh, symbol, days)
+        ex.shutdown(wait=False)
         try:
-            cached = nse.refresh(symbol, days)
+            cached = fut.result(timeout=budget)
         except Exception:
             pass
     return nse._merge(seeded.get("records", []), cached.get("records", []))
@@ -170,7 +176,12 @@ def inventory(symbol: str) -> dict[str, Any]:
 
 
 def ingest(symbol: str, progress: Callable[[str, float], None] | None = None, refresh: bool = False) -> list[dict]:
-    """Discover, download, extract and index the primary documents. Idempotent (checksum-addressed cache)."""
+    """Discover, download, extract and index the primary documents. Idempotent (checksum-addressed cache).
+
+    Live ingestion is capped so a cold, unseeded ticker finishes in ~20s on a small instance:
+    the 4 most recent concall transcripts, the latest annual report, up to 5 exchange-filed results, and
+    only the first config.MAX_PDF_PAGES pages of each PDF. Screener, NSE history and PDF downloads overlap.
+    """
     symbol = market_data.normalize_symbol(symbol)
     prog = progress or (lambda s, p: None)
     existing = _manifest_get(symbol)
@@ -180,49 +191,42 @@ def ingest(symbol: str, progress: Callable[[str, float], None] | None = None, re
         return existing
     prog("Finding primary documents", 0.04)
     market_data.get_eod_soft(symbol)
-    scr = screener.get_documents(symbol)
-    recs = _history(symbol)
-    want: list[dict] = []
-    seen_q: set[int] = set()
-    for c in scr["concalls"]:
-        qi = G.qidx_from_period(c["period"])
-        if c.get("transcript") and qi is not None and qi not in seen_q:
-            seen_q.add(qi)
-            want.append({"kind": "transcript", "title": f"Concall transcript · {c['period']}", "period": c["period"],
-                         "url": c["transcript"], "q": qi})
-        if len(seen_q) >= 4:
-            break
-    for r in _results_candidates(recs):
-        want.append({"kind": "results", "title": r["subject"], "period": G.qlabel(r["q"]), "url": r["attachment"], "q": r["q"]})
-    ars = scr["annual_reports"][:2]
-    # annual report: take the newest that actually yields text
-    for ar in ars:
-        want.append({"kind": "annual_report", "title": ar["title"], "period": str(ar["year"]), "url": ar["url"], "q": None})
-        break
-    total = len(want)
+    sel = screener.select_for_ingest(screener.get_documents(symbol))
+    want_static: list[dict] = [
+        {"kind": "transcript", "title": f"Concall transcript · {t['period']}", "period": t["period"], "url": t["url"], "q": t["q"]}
+        for t in sel["transcripts"]
+    ] + [
+        {"kind": "annual_report", "title": a["title"], "period": str(a["year"]), "url": a["url"], "q": None}
+        for a in sel["annual_reports"]
+    ]
     manifest: list[dict] = []
     lock = threading.Lock()
-    counter = {"n": 0}
+    state = {"done": 0, "total": len(want_static) + 5}   # results filings add up to 5 once NSE history returns
 
     def work(w: dict):
         d = documents.get_document(w["url"], symbol, w["kind"], w["title"], w["period"])
-        if d and d["status"] == "extraction_incomplete" and w["kind"] == "annual_report" and len(ars) > 1:
-            alt = ars[1]
-            d = documents.get_document(alt["url"], symbol, "annual_report", alt["title"], str(alt["year"])) or d
-            w = w | {"title": alt["title"], "period": str(alt["year"]), "url": alt["url"]}
         if d and d.get("pages"):
             documents.index_document(d)
         with lock:
-            counter["n"] += 1
-            prog(f"Reading documents ({counter['n']}/{total})", 0.08 + 0.5 * counter["n"] / max(total, 1))
+            state["done"] += 1
+            prog(f"Reading documents ({state['done']}/{state['total']})", 0.08 + 0.5 * state["done"] / max(state["total"], 1))
         return w, d
 
-    with ThreadPoolExecutor(max_workers=4) as ex:
-        for w, d in ex.map(work, want):
+    def collect(pairs):
+        for w, d in pairs:
             if d:
                 manifest.append({"doc_id": d["doc_id"], "symbol": symbol, "kind": w["kind"], "title": w["title"],
                                  "period": w["period"], "url": w["url"], "q": w.get("q"),
-                                 "n_pages": d.get("n_pages", 0), "status": d.get("status", "ok")})
+                                 "n_pages": d.get("n_pages", 0), "total_pages": d.get("total_pages") or d.get("n_pages", 0),
+                                 "status": d.get("status", "ok")})
+
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        static_futs = [ex.submit(work, w) for w in want_static]      # start downloading right away...
+        results = _results_candidates(_history(symbol))               # ...while NSE history is fetched (time-bounded)
+        state["total"] = len(want_static) + len(results)
+        res_futs = [ex.submit(work, {"kind": "results", "title": r["subject"], "period": G.qlabel(r["q"]),
+                                     "url": r["attachment"], "q": r["q"]}) for r in results]
+        collect(f.result() for f in static_futs + res_futs)
     cache.put_cache("docs", f"manifest_{symbol}.json", manifest)
     return manifest
 
@@ -259,13 +263,17 @@ def extract_guidance(entry: dict) -> list[dict]:
 
 def actuals_for(manifest: list[dict]) -> tuple[dict[int, dict], dict[int, dict]]:
     """quarter index -> derived ratios, and quarter index -> (card, entry) for citations."""
-    best: dict[int, tuple[int, dict, dict]] = {}
-    for e in manifest:
-        if e["kind"] != "results" or e.get("q") is None:
-            continue
+    entries = [e for e in manifest if e["kind"] == "results" and e.get("q") is not None]
+
+    def one(e: dict):
         rec = {"id": cache.sha(e["url"], n=16), "symbol": e["symbol"], "company": e["symbol"], "attachment": e["url"],
                "subject": e["title"], "ts": "2000-01-01T00:00:00+05:30", "text": ""}
-        card = classifier.extract_results(rec)
+        return e, classifier.extract_results(rec)
+
+    with ThreadPoolExecutor(max_workers=5) as ex:        # independent, I/O-bound model calls
+        extracted = list(ex.map(one, entries))
+    best: dict[int, tuple[int, dict, dict]] = {}
+    for e, card in extracted:
         if not card:
             continue
         filled = sum(1 for m in card["metrics"].values() for k in ("current", "prev_quarter", "year_ago") if m[k] is not None)
@@ -402,12 +410,22 @@ def build_metrics(series: dict | None, cards: dict[int, dict]) -> dict[str, list
 
 
 # ------------------------------------------------------------------ scorecard
-def build_scorecard(man: list[dict], actual_ratios: dict[int, dict], cards: dict[int, dict], series: dict | None = None) -> dict[str, Any] | None:
-    calls = sorted([e for e in man if e["kind"] == "transcript" and e.get("q") is not None], key=lambda e: e["q"])[-4:]
+def _last_calls(man: list[dict]) -> list[dict]:
+    return sorted([e for e in man if e["kind"] == "transcript" and e.get("q") is not None], key=lambda e: e["q"])[-4:]
+
+
+def extract_all_guidance(man: list[dict]) -> dict[str, list[dict]]:
+    calls = _last_calls(man)
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        return {e["doc_id"]: c for e, c in zip(calls, ex.map(extract_guidance, calls))}
+
+
+def build_scorecard(man: list[dict], actual_ratios: dict[int, dict], cards: dict[int, dict], series: dict | None = None,
+                    pre: dict[str, list[dict]] | None = None) -> dict[str, Any] | None:
+    calls = _last_calls(man)
     if not calls:
         return None
-    with ThreadPoolExecutor(max_workers=4) as ex:
-        extracted = list(ex.map(extract_guidance, calls))
+    extracted = [pre[e["doc_id"]] for e in calls] if pre is not None else list(extract_all_guidance(man).values())
     rows, commentary, gaps = [], [], []
     annual = G.annual_actuals(series["years"]) if series else {}
     latest_results_q = max(cards) if cards else None
@@ -635,10 +653,16 @@ def analyze(symbol: str, modules: list[str] | None, progress: Callable[[str, flo
     prog("Extracting guidance and results", 0.62)
     eod = market_data.get_eod_soft(symbol) or {}
     name = (eod.get("info") or {}).get("name") or symbol
-    ratios, cards = actuals_for(man)
-    series = extract_series(symbol, man)
+    need_score = bool({"narrative", "guidance"} & set(modules))
+    with ThreadPoolExecutor(max_workers=3) as ex:     # independent model calls run side by side
+        f_act = ex.submit(actuals_for, man)
+        f_ser = ex.submit(extract_series, symbol, man)
+        f_gui = ex.submit(extract_all_guidance, man) if need_score else None
+        ratios, cards = f_act.result()
+        series = f_ser.result()
+        pre = f_gui.result() if f_gui else None
     prog("Building four-quarter scorecard", 0.74)
-    score = build_scorecard(man, ratios, cards, series) if {"narrative", "guidance"} & set(modules) else None
+    score = build_scorecard(man, ratios, cards, series, pre) if need_score else None
     metrics = build_metrics(series, cards)
     prog("Reasoning over evidence", 0.84)
     sections_llm, takeaways, gaps = synthesize(symbol, name, man, modules, metrics, score)
@@ -655,14 +679,20 @@ def analyze(symbol: str, modules: list[str] | None, progress: Callable[[str, flo
             gap = "Not found in available primary documents."
         sections.append({"id": m, "title": TITLES[m], "claims": sec["claims"], "metrics": metrics.get(m, []), "gap": gap})
     if series is None:
-        gaps.append("Annual report text could not be read; multi-year figures are unavailable.")
+        ar = next((e for e in man if e["kind"] == "annual_report"), None)
+        if ar and (ar.get("total_pages") or 0) > ar.get("n_pages", 0):
+            gaps.append(f"Live runs read only the first {ar['n_pages']} of {ar['total_pages']} pages of the annual report, "
+                        "which did not include the multi-year financial tables; trajectory, balance-sheet and cash figures are limited.")
+        else:
+            gaps.append("Annual report text could not be read; multi-year figures are unavailable.")
     clean_score = None
     if score:
         clean_score = {k: v for k, v in score.items() if k != "claims"}
     result = {
         "symbol": symbol, "name": name, "as_of": cache.iso_now(), "source": "live",
         "models": {"tier1": config.FAST_MODEL, "tier2": config.REASONING_MODEL},
-        "documents": [{k: e[k] for k in ("doc_id", "kind", "title", "period", "url", "n_pages", "status")} for e in man],
+        "documents": [{k: e[k] for k in ("doc_id", "kind", "title", "period", "url", "n_pages", "status")}
+                      | {"total_pages": e.get("total_pages") or e["n_pages"]} for e in man],
         "modules": modules, "sections": sections, "scorecard": clean_score, "gaps": gaps,
     }
     if set(modules) == set(ALL_MODULES) and any(s["claims"] for s in sections):
@@ -715,8 +745,13 @@ JOBS: dict[str, dict[str, Any]] = {}
 def start_job(symbol: str, modules: list[str] | None, refresh: bool = False) -> str:
     symbol = market_data.normalize_symbol(symbol)
     market_data.get_eod_soft(symbol)  # fail fast on invalid tickers, but tolerate a Yahoo outage
+    mods = tuple(sorted(modules or ALL_MODULES))
+    for j in list(JOBS.values()):       # one heavy job per ticker at a time on a small instance: join the running one
+        if j["symbol"] == symbol and j.get("modules") == mods and j["status"] in ("queued", "running") and not refresh:
+            return j["id"]
     jid = uuid.uuid4().hex[:12]
-    JOBS[jid] = {"id": jid, "symbol": symbol, "status": "queued", "stage": "Queued", "progress": 0.0, "error": None, "result": None}
+    JOBS[jid] = {"id": jid, "symbol": symbol, "modules": mods, "status": "queued", "stage": "Queued", "progress": 0.0,
+                 "error": None, "result": None}
 
     def run():
         job = JOBS[jid]

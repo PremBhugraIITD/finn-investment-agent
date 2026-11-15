@@ -1,9 +1,9 @@
 """PDF download, local page-indexed text extraction, chunking and SQLite FTS5 index."""
 from __future__ import annotations
 
-import io
 import re
 import sqlite3
+import tempfile
 import threading
 from typing import Any
 
@@ -12,7 +12,6 @@ from pypdf import PdfReader
 
 from .. import cache, config
 
-MAX_PAGES = 450
 CHUNK_CHARS = 4800   # roughly 1,200 tokens
 OVERLAP_CHARS = 600
 _db_lock = threading.Lock()
@@ -30,30 +29,46 @@ def _clean(text: str) -> str:
     return text.strip()
 
 
-def fetch_pdf_bytes(url: str) -> bytes:
+def fetch_pdf(url: str):
+    """Stream the download straight to a temp file with a hard size cap. The PDF never sits fully in RAM,
+    which keeps a large annual report inside a 512 MB instance. Returns (file object at offset 0, size, head)."""
     headers = {"User-Agent": config.USER_AGENT, "Accept": "application/pdf,*/*"}
     if "bseindia.com" in url:
         headers["Referer"] = "https://www.bseindia.com/"
     elif "nseindia" in url:
         headers["Referer"] = "https://www.nseindia.com/"
-    r = requests.get(url, headers=headers, timeout=90)
-    r.raise_for_status()
-    if r.content[:4] != b"%PDF":
-        raise ValueError("Not a PDF response")
-    if len(r.content) > 80_000_000:
-        raise ValueError("PDF too large")
-    return r.content
+    f = tempfile.TemporaryFile()
+    size, head = 0, b""
+    try:
+        with requests.get(url, headers=headers, timeout=(10, 45), stream=True) as r:
+            r.raise_for_status()
+            for chunk in r.iter_content(chunk_size=256 * 1024):
+                if not head:
+                    head = chunk[:4096]
+                size += len(chunk)
+                if size > config.MAX_PDF_BYTES:
+                    raise ValueError(f"PDF larger than {config.MAX_PDF_BYTES // 1_000_000} MB")
+                f.write(chunk)
+        if head[:4] != b"%PDF":
+            raise ValueError("Not a PDF response")
+        f.seek(0)
+        return f, size, head
+    except Exception:
+        f.close()
+        raise
 
 
-def extract_pages(data: bytes) -> list[dict]:
-    reader = PdfReader(io.BytesIO(data))
+def extract_pages(fileobj) -> tuple[list[dict], int]:
+    """Extract only the first config.MAX_PDF_PAGES pages (read lazily from the file). Returns (pages, total_pages)."""
+    reader = PdfReader(fileobj)
+    total = len(reader.pages)
     pages = []
-    for i, p in enumerate(reader.pages[:MAX_PAGES], 1):
+    for i in range(min(total, config.MAX_PDF_PAGES)):
         try:
-            t = p.extract_text() or ""
+            t = reader.pages[i].extract_text() or ""
         except Exception:
             t = ""
-        pages.append({"n": i, "text": _clean(t)})
+        pages.append({"n": i + 1, "text": _clean(t)})
     # drop repeated headers/footers (same line on >40% of pages)
     if len(pages) > 8:
         from collections import Counter
@@ -65,7 +80,7 @@ def extract_pages(data: bytes) -> list[dict]:
         if noisy:
             for pg in pages:
                 pg["text"] = "\n".join(l for l in pg["text"].split("\n") if l.strip() not in noisy)
-    return pages
+    return pages, total
 
 
 def get_document(url: str, symbol: str, kind: str, title: str = "", period: str = "",
@@ -79,8 +94,11 @@ def get_document(url: str, symbol: str, kind: str, title: str = "", period: str 
     if not allow_fetch:
         return None
     try:
-        data = fetch_pdf_bytes(url)
-        pages = extract_pages(data)
+        fobj, size, head = fetch_pdf(url)
+        try:
+            pages, total_pages = extract_pages(fobj)
+        finally:
+            fobj.close()
     except Exception as e:  # network error, bad PDF, etc.
         return {"doc_id": did, "url": url, "symbol": symbol, "kind": kind, "title": title, "period": period,
                 "pages": [], "n_pages": 0, "status": "fetch_failed", "error": str(e)[:200]}
@@ -88,8 +106,9 @@ def get_document(url: str, symbol: str, kind: str, title: str = "", period: str 
     status = "ok" if pages and chars / max(len(pages), 1) > 200 else "extraction_incomplete"
     rec = {
         "doc_id": did, "url": url, "symbol": symbol, "kind": kind, "title": title, "period": period,
-        "checksum": cache.sha(len(data), data[:4096], n=16), "fetched_at": cache.iso_now(),
-        "n_pages": len(pages), "status": status, "pages": pages,
+        "checksum": cache.sha(size, head, n=16), "fetched_at": cache.iso_now(),
+        "n_pages": len(pages), "total_pages": total_pages, "truncated": total_pages > len(pages),
+        "status": status, "pages": pages,
     }
     cache.put_cache("docs", name, rec)
     return rec
