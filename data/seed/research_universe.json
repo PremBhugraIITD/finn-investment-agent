@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "note": "Ad-hoc Pull-mode demo companies. None overlaps the portfolio. The research engine works for any valid NSE ticker.",
+  "companies": [
+    {"symbol": "DMART", "name": "Avenue Supermarts", "sector": "Retail"},
+    {"symbol": "MAZDOCK", "name": "Mazagon Dock Shipbuilders", "sector": "Defence Shipbuilding"},
+    {"symbol": "KPITTECH", "name": "KPIT Technologies", "sector": "Automotive Software"},
+    {"symbol": "RAINBOW", "name": "Rainbow Children's Medicare", "sector": "Hospitals"}
+  ]
+}

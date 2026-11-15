@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: finn
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_FAST_MODEL
+        value: gpt-4o-mini
+      - key: OPENAI_REASONING_MODEL
+        value: gpt-4o
+      - key: REFRESH_SECRET
+        generateValue: true
+      - key: FRONTEND_ORIGIN
+        value: "*"
+      - key: MAX_CHEAP_CALLS
+        value: "400"
+      - key: MAX_DEEP_CALLS
+        value: "30"

@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+yfinance
+requests
+beautifulsoup4
+lxml
+pypdf
+pydantic
+python-dotenv
+openai

@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "note": "Mock portfolio. Sector and cap band are demo labels; the app recomputes name, sector, market cap and band from live data when available.",
+  "companies": [
+    {"symbol": "RELIANCE", "name": "Reliance Industries", "sector": "Energy & Conglomerate", "cap_band": "Large"},
+    {"symbol": "HDFCBANK", "name": "HDFC Bank", "sector": "Private Banking", "cap_band": "Large"},
+    {"symbol": "TCS", "name": "Tata Consultancy Services", "sector": "IT Services", "cap_band": "Large"},
+    {"symbol": "BHARTIARTL", "name": "Bharti Airtel", "sector": "Telecom", "cap_band": "Large"},
+    {"symbol": "SUNPHARMA", "name": "Sun Pharmaceutical Industries", "sector": "Pharmaceuticals", "cap_band": "Large"},
+    {"symbol": "LT", "name": "Larsen & Toubro", "sector": "Engineering & Infra", "cap_band": "Large"},
+    {"symbol": "MARUTI", "name": "Maruti Suzuki India", "sector": "Automobiles", "cap_band": "Large"},
+    {"symbol": "ITC", "name": "ITC", "sector": "Consumer Staples", "cap_band": "Large"},
+    {"symbol": "DIXON", "name": "Dixon Technologies", "sector": "Electronics Manufacturing", "cap_band": "Mid"},
+    {"symbol": "POLYCAB", "name": "Polycab India", "sector": "Cables & Electricals", "cap_band": "Mid"},
+    {"symbol": "CDSL", "name": "Central Depository Services", "sector": "Capital Market Infra", "cap_band": "Mid"},
+    {"symbol": "DEEPAKNTR", "name": "Deepak Nitrite", "sector": "Specialty Chemicals", "cap_band": "Mid"},
+    {"symbol": "CHALET", "name": "Chalet Hotels", "sector": "Hospitality", "cap_band": "Mid"},
+    {"symbol": "KPRMILL", "name": "K.P.R. Mill", "sector": "Textiles & Apparel", "cap_band": "Mid"},
+    {"symbol": "CERA", "name": "Cera Sanitaryware", "sector": "Building Products", "cap_band": "Small"},
+    {"symbol": "BECTORFOOD", "name": "Mrs. Bectors Food Specialities", "sector": "Packaged Food", "cap_band": "Small"},
+    {"symbol": "CMSINFO", "name": "CMS Info Systems", "sector": "Cash Management", "cap_band": "Small"},
+    {"symbol": "SJS", "name": "S.J.S. Enterprises", "sector": "Auto Components", "cap_band": "Small"}
+  ]
+}
