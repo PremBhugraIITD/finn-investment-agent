@@ -2,7 +2,7 @@
 
 Subject: IIT Delhi – AI Engineer - 2027
 
-**Links:** deployed app: `<paste Render URL>` · repo: `<paste GitHub URL>` · build history: `<paste Cursor / chat export links>`
+**Links:** deployed app: `https://finn-6axj.onrender.com` · repo: `https://github.com/PremBhugraIITD/finn-investment-agent` · build history: `docs/build-history.md`
 
 ## What I built
 FINN is a mobile-first PWA with two modes over an 18-stock NSE portfolio (RELIANCE, HDFCBANK, TCS, BHARTIARTL, SUNPHARMA, LT, MARUTI, ITC, DIXON, POLYCAB, CDSL, DEEPAKNTR, CHALET, KPRMILL, CERA, BECTORFOOD, CMSINFO, SJS).
@@ -21,7 +21,7 @@ FINN is a mobile-first PWA with two modes over an 18-stock NSE portfolio (RELIAN
 Broker/news data, price targets or advice, trading, portfolio accounting, auth, a hosted vector database, native push notifications (in-app inbox instead), and test suites (one smoke script instead).
 
 ## Known limits
-Screener lists only annual-call transcripts for DMART and nothing recent for MAZDOCK, so their scorecards show fewer than four consecutive quarters and say so. Results extraction depends on each filing's layout; units and consolidated/standalone basis are shown on every card. EBITDA appears only when reported or derivable.
+Screener lists only annual-call transcripts for DMART and nothing recent for MAZDOCK, so their scorecards show fewer than four consecutive quarters and say so. Results extraction depends on each filing's layout; units and consolidated/standalone basis are shown on every card. EBITDA appears only when reported or derivable. The live link runs on Render's free tier, so if it has been idle for 15 minutes, the first load will take about 30–60 seconds to wake up.
 
 ## Where I'd take it next
 Real push delivery (web push / mobile) fed by a scheduled worker; BSE as a second filings source; reconciling restated figures across quarters; a per-company memory of management promises that persists across calls; evaluation sets for classification and extraction accuracy.
