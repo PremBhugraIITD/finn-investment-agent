@@ -2,9 +2,12 @@ services:
   - type: web
     name: finn
     runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
     plan: free
     healthCheckPath: /health
     envVars:
+      # Secret: never committed, set in the Render dashboard.
       - key: OPENAI_API_KEY
         sync: false
       - key: OPENAI_FAST_MODEL
@@ -13,6 +16,7 @@ services:
         value: gpt-4o
       - key: REFRESH_SECRET
         generateValue: true
+      # Frontend is served by the same service, so CORS is only needed for an optional split deploy.
       - key: FRONTEND_ORIGIN
         value: "*"
       - key: MAX_CHEAP_CALLS
