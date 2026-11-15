@@ -26,6 +26,8 @@ MAX_DEEP_CALLS = int(os.getenv("MAX_DEEP_CALLS", "30"))
 # Cache TTLs (seconds)
 NSE_TTL = 300
 MARKET_TTL = 6 * 3600
+# Total wall-clock budget for a live Yahoo refresh on the request path; then serve cache/seed immediately.
+MARKET_LIVE_BUDGET_S = float(os.getenv("MARKET_LIVE_BUDGET_S", "6"))
 INFO_TTL = 24 * 3600
 SCREENER_TTL = 24 * 3600
 

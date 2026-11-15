@@ -53,18 +53,24 @@ async def finn_error_handler(_: Request, exc: FinnError):
     return JSONResponse(status_code=exc.status, content={"error": {"code": exc.code, "message": exc.message}})
 
 
+# /health and /ready are `async def` on purpose: they run directly on the event loop, so they answer even when
+# every worker thread is busy with slow requests, and they do ZERO I/O (no network, no disk).
+_SEED_PRESENT = (config.SEED / "portfolio.json").exists()
+
+
 @app.get("/health")
-def health():
+async def health():
     return {"status": "ok", "time": cache.iso_now()}
 
 
 @app.get("/ready")
-def ready():
+async def ready():
     return {
         "status": "ready",
         "openai_key": bool(config.OPENAI_API_KEY),
         "models": {"tier1": config.FAST_MODEL, "tier2": config.REASONING_MODEL},
-        "seed_present": (config.SEED / "portfolio.json").exists(),
+        "seed_present": _SEED_PRESENT,
+        "market_data": market_data.live_status(),
         "budget": cache.budget_status(),
     }
 

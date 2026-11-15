@@ -150,7 +150,7 @@ def _history(symbol: str, days: int = 500) -> list[dict]:
 
 def inventory(symbol: str) -> dict[str, Any]:
     symbol = market_data.normalize_symbol(symbol)
-    eod = market_data.get_eod(symbol)  # raises TICKER_NOT_FOUND for invalid tickers
+    eod = market_data.get_eod_soft(symbol) or {}  # TICKER_NOT_FOUND still raises; a Yahoo outage must not block research
     try:
         scr = screener.get_documents(symbol)
     except FinnError:
@@ -179,7 +179,7 @@ def ingest(symbol: str, progress: Callable[[str, float], None] | None = None, re
         _ensure_indexed(symbol)
         return existing
     prog("Finding primary documents", 0.04)
-    market_data.get_eod(symbol)
+    market_data.get_eod_soft(symbol)
     scr = screener.get_documents(symbol)
     recs = _history(symbol)
     want: list[dict] = []
@@ -633,7 +633,7 @@ def analyze(symbol: str, modules: list[str] | None, progress: Callable[[str, flo
     if not man:
         raise FinnError("NO_PRIMARY_DOCUMENTS", f"No primary documents (annual report, transcripts, results) found for {symbol}.", 404)
     prog("Extracting guidance and results", 0.62)
-    eod = market_data.get_eod(symbol)
+    eod = market_data.get_eod_soft(symbol) or {}
     name = (eod.get("info") or {}).get("name") or symbol
     ratios, cards = actuals_for(man)
     series = extract_series(symbol, man)
@@ -714,7 +714,7 @@ JOBS: dict[str, dict[str, Any]] = {}
 
 def start_job(symbol: str, modules: list[str] | None, refresh: bool = False) -> str:
     symbol = market_data.normalize_symbol(symbol)
-    market_data.get_eod(symbol)  # fail fast with TICKER_NOT_FOUND
+    market_data.get_eod_soft(symbol)  # fail fast on invalid tickers, but tolerate a Yahoo outage
     jid = uuid.uuid4().hex[:12]
     JOBS[jid] = {"id": jid, "symbol": symbol, "status": "queued", "stage": "Queued", "progress": 0.0, "error": None, "result": None}
 

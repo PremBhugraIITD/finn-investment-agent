@@ -32,9 +32,12 @@ def get(path, **kw):
 
 
 def health():
-    assert get("/health")["status"] == "ok"
-    r = get("/ready")
-    return f"models={r['models']} openai_key={r['openai_key']}"
+    # First request may hit a Render free-tier cold start (up to ~60-100s); give it 120s, then the rest are fast.
+    t0 = time.time()
+    assert get("/health", timeout=120)["status"] == "ok"
+    cold = time.time() - t0
+    r = get("/ready", timeout=30)
+    return f"first /health {cold:.1f}s, models={r['models']} openai_key={r['openai_key']} market_data={r.get('market_data')}"
 
 
 def portfolio():
